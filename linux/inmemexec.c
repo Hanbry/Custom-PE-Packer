@@ -59,10 +59,7 @@ int main(int argc, char *argv[], char *envp[]) {
         free(elf_buf);
         fclose(elf_fd);
         return 1;
-    }
-
-    // Map the ELF file into memory and write it to the memory file
-    //char *buf = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, elf_fd, 0);
+    }   
 
     // Get key from input and decode to byte array
     const char *hexstring = argv[2];
