@@ -10,15 +10,15 @@
 
 #define KEY_LENGTH 16 // 128 bits
 
-void encrypt_RC4(unsigned char *buf, size_t file_size, unsigned char *key, size_t key_size) {
+void encrypt_RC4(unsigned char *buf, size_t file_size, unsigned char *key) {
     RC4_KEY rc4_key;
-    RC4_set_key(&rc4_key, key_size, key);
+    RC4_set_key(&rc4_key, KEY_LENGTH, key);
     RC4(&rc4_key, file_size, buf, buf);
 }
 
-void encrypt_XOR(unsigned char *buf, size_t file_size, unsigned char *key, size_t key_size) {
+void encrypt_XOR(unsigned char *buf, size_t file_size, unsigned char *key) {
     for (size_t i = 0; i < file_size; i++) {
-        buf[i] ^= key[i % key_size];
+        buf[i] ^= key[i % KEY_LENGTH];
     }
 }
 
@@ -92,8 +92,8 @@ int main(int argc, char *argv[]) {
     printf("\n");
 
     // Encrypt the ELF file
-    encrypt_RC4(elf_buf, file_size, key, KEY_LENGTH);
-    encrypt_XOR(elf_buf, file_size, key, KEY_LENGTH);
+    encrypt_RC4(elf_buf, file_size, key);
+    encrypt_XOR(elf_buf, file_size, key);
 
     // Write the encrypted ELF file to the output file
     fwrite(elf_buf, file_size, 1, output_fd);

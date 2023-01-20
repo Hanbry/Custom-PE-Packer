@@ -10,15 +10,15 @@
 
 #define KEY_LENGTH 16 // 128 bits
 
-int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size) {
+int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key) {
     // Decode XOR
     for (size_t i = 0; i < file_size; i++) {
-        elf_buf[i] ^= key[i % key_size];
+        elf_buf[i] ^= key[i % KEY_LENGTH];
     }
 
     // Decode RC4
     RC4_KEY rc4_key;
-    RC4_set_key(&rc4_key, key_size, key);
+    RC4_set_key(&rc4_key, KEY_LENGTH, key);
     RC4(&rc4_key, file_size, elf_buf, elf_buf);
 
     return 0;
@@ -72,7 +72,7 @@ int main(int argc, char *argv[], char *envp[]) {
     }
 
     // Decrypt the ELF file
-    int ret = decrypt_elf(elf_buf, file_size, key, KEY_LENGTH);
+    int ret = decrypt_elf(elf_buf, file_size, key);
     if (ret != 0) {
         perror("Failed to decrypt ELF file");
         free(elf_buf);
