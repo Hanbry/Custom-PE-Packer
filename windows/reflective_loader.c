@@ -1,20 +1,67 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 //#include <winnt.h>
 #include <windows.h>
+#include <psapi.h>
 //#include <openssl/rc4.h>
 
 #define KEY_LENGTH 16 // 128 bits
+
+// https://wirediver.com/tutorial-writing-a-pe-packer-part-2/
 
 // Declarations
 void* load_PE (char* PE_data);
 int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size);
 
 int main(int argc, char** argv) {
-     if (argc < 3) {
-        printf("Usage: %s [PE File] [Key]\n", argv[0]);
+     if (argc < 2) {
+        printf("Usage: %s [Key]\n", argv[0]);
         return 1;
     }
+
+    FILE* loader_file = fopen(argv[0], "rb");
+    if (loader_file == NULL) {
+        perror("Failed to fopen loader PE file");
+        return 1;
+    }
+
+    // Get file size
+    fseek(loader_file, 0L, SEEK_END);
+    long int loader_file_size = ftell(loader_file);
+    fseek(loader_file, 0L, SEEK_SET);
+
+    if (fseek(loader_file, -16L, SEEK_END) != 0) {
+        perror("Failed to seek to end of file");
+        return 1;
+    }
+
+    // Read the last 8 bytes
+    char size_buffer[16];
+    size_t read_size = fread(size_buffer, 1, sizeof(size_buffer), loader_file);
+    if (read_size != sizeof(size_buffer)) {
+        perror("Failed to read file");
+        return 1;
+    }
+
+    size_t loader_size = *(int64_t*)(size_buffer);
+    size_t encrypted_size = *(int64_t*)(size_buffer[8]);
+    printf("loader size: %i\n", loader_size);
+    printf("encrypted size: %i\n", encrypted_size);
+
+    // Allocate memory and read the whole file
+    char* loader_buf = malloc(loader_file_size+1);
+
+    // Read file
+    size_t l_n_read = fread(loader_buf, 1, loader_file_size, loader_file);
+    if(l_n_read != loader_file_size) {
+        printf("reading error (%d)\n", l_n_read);
+        return 1;
+    }
+
+    // Get a pointer to the encrypted PE data
+    char *pe_buf = ((char*)loader_buf) + sizeof(loader_buf) - encrypted_size - 16;
+
 
     FILE* exe_file = fopen(argv[1], "rb");
     if (exe_file == NULL) {
@@ -24,19 +71,19 @@ int main(int argc, char** argv) {
 
 
     // Get file size
-    fseek(exe_file, 0L, SEEK_END);
-    long int file_size = ftell(exe_file);
-    fseek(exe_file, 0L, SEEK_SET);
+    // fseek(exe_file, 0L, SEEK_END);
+    // long int encrypted_size = ftell(exe_file);
+    // fseek(exe_file, 0L, SEEK_SET);
 
     // Allocate memory and read the whole file
-    char* pe_buf = malloc(file_size+1);
+    // char* pe_buf = malloc(encrypted_size+1);
 
     // Read file
-    size_t n_read = fread(pe_buf, 1, file_size, exe_file);
-    if(n_read != file_size) {
-        printf("reading error (%d)\n", n_read);
-        return 1;
-    }
+    // size_t n_read = fread(pe_buf, 1, encrypted_size, exe_file);
+    // if(n_read != encrypted_size) {
+    //     printf("reading error (%d)\n", n_read);
+    //     return 1;
+    // }
 
     // Get key from input and decode to byte array
     const char *hexstring = argv[2];
@@ -48,10 +95,13 @@ int main(int argc, char** argv) {
         pos += 2;
     }
 
-    decrypt_PE(pe_buf, file_size, key);
+    printf("Decrypt PE\n");
+    decrypt_PE(pe_buf, encrypted_size, key);
 
     // Load the PE into memory
     void* start_address = load_PE(pe_buf);
+
+    printf("Starting PE\n");
     if(start_address) {
         // call its entry point
         ((void (*)(void)) start_address)();
@@ -73,27 +123,31 @@ void* load_PE (char* PE_data) {
     DWORD size_of_headers = p_NT_HDR->OptionalHeader.SizeOfHeaders;
     WORD num_of_sections = p_NT_HDR->FileHeader.NumberOfSections;
 
+    printf("hdr_image_base:%i\nsize_of_image:%i\nentry_point_RVA:%i\nsize_of_headers:%i\nnum_of_sections:%i\n", hdr_image_base, size_of_image, entry_point_RVA, size_of_headers, num_of_sections);
+
     char* image_base = (char*)VirtualAlloc(NULL, size_of_image, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if(image_base == NULL) return NULL; // allocation didn't work
 
+    printf("Copy PE section wise into memory\n");
     // COPY HEADERS TO MEMORY
     memcpy(image_base, PE_data, size_of_headers);
-
     // Copy PE section wise into memory
-    for(int i = 0; i < num_of_sections; ++i) {
+    for (int i = 0; i < num_of_sections; ++i) {
         // calculate the Virtual Address we need to copy the content, from the Relative Virtual Address 
         // section[i].VirtualAddress is a Relative Virtual Address
         char* dest_addr = image_base + sections[i].VirtualAddress;
         DWORD raw_data_size = sections[i].SizeOfRawData;
 
         // check if there is raw data to copy
-        if(raw_data_size > 0) {
+        if (raw_data_size > 0) {
             // We copy SizeOfRawData bytes, from the offset PointerToRawData in the file
             memcpy(dest_addr, PE_data + sections[i].PointerToRawData, raw_data_size);
         } else {
             memset(dest_addr, 0, sections[i].Misc.VirtualSize);
         }
     }
+
+    printf("Handle Import Table\n");
 
     // IMPORT TABLE
     IMAGE_DATA_DIRECTORY* data_directory = p_NT_HDR->OptionalHeader.DataDirectory;
@@ -107,8 +161,12 @@ void* load_PE (char* PE_data) {
         // Get the name of the dll, and import it
         char* module_name = image_base + import_descriptors[i].Name;
         HMODULE import_module = LoadLibraryA(module_name);
+        printf("Module Name: %s\n", module_name);
         
-        if (import_module == NULL) return NULL;
+        if (import_module == NULL) {
+            printf("Import Module could not be found %s, continue...\n", module_name);
+            continue;
+        }
 
         // the lookup table points to function names or ordinals => it is the IDT
         IMAGE_THUNK_DATA *lookup_table = (IMAGE_THUNK_DATA*)(image_base + import_descriptors[i].OriginalFirstThunk);
@@ -133,15 +191,22 @@ void* load_PE (char* PE_data) {
                 function_handle = (void *)GetProcAddress(import_module, funct_name);
             } else {
                 // import by ordinal, directly
-                function_handle = (void *)GetProcAddress(import_module, (LPSTR)lookup_addr);
+                DWORD ordinal_num = lookup_addr & (~IMAGE_ORDINAL_FLAG);
+                printf("import by ordinal %u, directly\n", ordinal_num);
+                function_handle = (void *)GetProcAddress(import_module, MAKEINTRESOURCEA(lookup_addr));
             }
 
-            if (function_handle == NULL) return NULL;
+            if (function_handle == NULL) {
+                printf("Function could not be found in module %s\n", module_name);
+                continue;
+            }
 
             // change the IAT, and put the function address inside.
             address_table[i].u1.Function = (DWORD)function_handle;
         }
     }
+
+    printf("Handle Relocations\n");
 
     // RELOCATIONS
     // this is how much we shifted the ImageBase
