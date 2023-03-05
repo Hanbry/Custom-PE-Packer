@@ -221,7 +221,7 @@ void rc4_init(unsigned char *s, unsigned char *key) {
         s[i] = i;
     }
     for (i = 0; i < 256; i++) {
-        j = (j + s[i] + key[i % KEY_LENGTH]) % N;
+        j = (j + s[i] + key[i % KEY_LENGTH]) % 256;
         swap(&s[i], &s[j]);
     }
 }
