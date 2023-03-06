@@ -13,8 +13,6 @@
 // Declarations
 void* load_PE (char* PE_data);
 int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size);
-void disableETW(void);
-
 
 // int _start(void) {
 
