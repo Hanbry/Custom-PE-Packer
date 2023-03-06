@@ -1,22 +1,52 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-//#include <winnt.h>
 #include <windows.h>
 #include <psapi.h>
-//#include <openssl/rc4.h>
 
 #define KEY_LENGTH 16 // 128 bits
+#define PRIME_LENGTH 8 // 64 bits
+#define PRIME_TOP 60124
 
 // https://wirediver.com/tutorial-writing-a-pe-packer-part-2/
 
 // Declarations
 void* load_PE (char* PE_data);
 int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size);
+void disableETW(void);
+
+
+// int _start(void) {
+
+//     // Get the current module VA (ie PE header addr)
+//     char* unpacker_VA = (char*) GetModuleHandleA(NULL);
+
+//     // get to the section header
+//     IMAGE_DOS_HEADER* p_DOS_HDR  = (IMAGE_DOS_HEADER*) unpacker_VA;
+//     IMAGE_NT_HEADERS* p_NT_HDR = (IMAGE_NT_HEADERS*) (((char*) p_DOS_HDR) + p_DOS_HDR->e_lfanew);
+//     IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
+
+//     char* packed_PE = NULL;
+//     char packed_section_name[] = ".packed";
+
+//     // search for the ".packed" section
+//     for(int i=0; i<p_NT_HDR->FileHeader.NumberOfSections; ++i) {
+//         if (mystrcmp(sections[i].Name, packed_section_name)) {
+//             packed_PE = unpacker_VA + sections[i].VirtualAddress;
+//             break;
+//         }
+//     }
+
+//     //load the data located at the .packed section
+//     if(packed_PE != NULL) {
+//         void (*packed_entry_point)(void) = (void(*)()) load_PE(packed_PE);
+//         packed_entry_point();
+//     }
+// }
 
 int main(int argc, char** argv) {
-     if (argc < 2) {
-        printf("Usage: %s [Key]\n", argv[0]);
+     if (argc > 1) {
+        printf("Usage: %s\n", argv[0]);
         return 1;
     }
 
@@ -31,63 +61,40 @@ int main(int argc, char** argv) {
     long int loader_file_size = ftell(loader_file);
     fseek(loader_file, 0L, SEEK_SET);
 
-    if (fseek(loader_file, -16L, SEEK_END) != 0) {
+    if (fseek(loader_file, -48L, SEEK_END) != 0) {
         perror("Failed to seek to end of file");
         return 1;
     }
-
     // Read the last 8 bytes
-    char size_buffer[16];
+    char size_buffer[48]; // 8 byte loader_size + 8 byte encrypted_size + 32 byte ascii key string
     size_t read_size = fread(size_buffer, 1, sizeof(size_buffer), loader_file);
     if (read_size != sizeof(size_buffer)) {
         perror("Failed to read file");
         return 1;
     }
+    fseek(loader_file, 0L, SEEK_SET);
 
     size_t loader_size = *(int64_t*)(size_buffer);
-    size_t encrypted_size = *(int64_t*)(size_buffer[8]);
-    printf("loader size: %i\n", loader_size);
-    printf("encrypted size: %i\n", encrypted_size);
+    size_t encrypted_size = *(int64_t*)(size_buffer+8);
+    char *key_hexstring = (size_buffer+16);
+    printf("Loader size: %i\n", loader_size);
+    printf("Encrypted size: %i\n", encrypted_size);
+    printf("Loader file size: %i\n", loader_file_size);
+    printf("Obfuscated Decode key: %s\n", key_hexstring);
 
     // Allocate memory and read the whole file
-    char* loader_buf = malloc(loader_file_size+1);
+    char* pe_buf = malloc(encrypted_size);
 
     // Read file
-    size_t l_n_read = fread(loader_buf, 1, loader_file_size, loader_file);
-    if(l_n_read != loader_file_size) {
+    fseek(loader_file, loader_size, SEEK_SET);
+    size_t l_n_read = fread(pe_buf, 1, encrypted_size, loader_file);
+    if(l_n_read != encrypted_size) {
         printf("reading error (%d)\n", l_n_read);
         return 1;
     }
 
-    // Get a pointer to the encrypted PE data
-    char *pe_buf = ((char*)loader_buf) + sizeof(loader_buf) - encrypted_size - 16;
-
-
-    FILE* exe_file = fopen(argv[1], "rb");
-    if (exe_file == NULL) {
-        perror("Failed to fopen PE file");
-        return 1;
-    }
-
-
-    // Get file size
-    // fseek(exe_file, 0L, SEEK_END);
-    // long int encrypted_size = ftell(exe_file);
-    // fseek(exe_file, 0L, SEEK_SET);
-
-    // Allocate memory and read the whole file
-    // char* pe_buf = malloc(encrypted_size+1);
-
-    // Read file
-    // size_t n_read = fread(pe_buf, 1, encrypted_size, exe_file);
-    // if(n_read != encrypted_size) {
-    //     printf("reading error (%d)\n", n_read);
-    //     return 1;
-    // }
-
     // Get key from input and decode to byte array
-    const char *hexstring = argv[2];
-    const char *pos = hexstring;
+    const char *pos = key_hexstring;
     unsigned char key[KEY_LENGTH];
 
     for (size_t count = 0; count < sizeof key/sizeof *key; count++) {
@@ -98,6 +105,7 @@ int main(int argc, char** argv) {
     printf("Decrypt PE\n");
     decrypt_PE(pe_buf, encrypted_size, key);
 
+    printf("Load PE\n");
     // Load the PE into memory
     void* start_address = load_PE(pe_buf);
 
@@ -192,7 +200,7 @@ void* load_PE (char* PE_data) {
             } else {
                 // import by ordinal, directly
                 DWORD ordinal_num = lookup_addr & (~IMAGE_ORDINAL_FLAG);
-                printf("import by ordinal %u, directly\n", ordinal_num);
+                printf("Import by ordinal %u directly\n", ordinal_num);
                 function_handle = (void *)GetProcAddress(import_module, MAKEINTRESOURCEA(lookup_addr));
             }
 
@@ -271,8 +279,24 @@ void* load_PE (char* PE_data) {
 }
 
 
+// ============= LOADER OBFUSCATION HERE =============
+
+
 
 // =============== DEOBFUSCATION HERE ================
+
+uint64_t prime_number(uint64_t n) {
+    uint64_t last_prime = 0;
+    for (uint64_t number = 0; number <= n; number++) {
+        int prime = 1;
+        for(uint64_t divisor = 2; divisor < number; divisor++) {
+            if ((number % divisor) == 0) prime = 0;
+        }
+        if (prime) last_prime = number;
+    }
+
+    return last_prime;
+}
 
 void swap(unsigned char *a, unsigned char *b) {
     unsigned char temp = *a;
@@ -302,6 +326,24 @@ void rc4_crypt(unsigned char *s, unsigned char *data, int data_len) {
 }
 
 int decrypt_PE(unsigned char *pe_buf, size_t file_size, unsigned char *key) {
+
+    printf("Start prime calculation\n");
+    uint64_t last_prime = prime_number(PRIME_TOP);
+    uint8_t* prime_ptr = (uint8_t *)(&last_prime);
+    printf("Last prime number: %llu\n", last_prime);
+   
+    // XOR decode key with prime 
+    for (size_t i = 0; i < KEY_LENGTH; i++) {
+        key[i] ^= prime_ptr[i % PRIME_LENGTH];
+    }
+
+    char hex_string[KEY_LENGTH * 2 + 1];
+    for (int i = 0; i < KEY_LENGTH; i++) {
+        sprintf(&hex_string[i * 2], "%02x", key[i]);
+    }
+    printf("Deobfuscated Key: %s\n", hex_string);
+
+
     // Decode XOR
     for (size_t i = 0; i < file_size; i++) {
         pe_buf[i] ^= key[i % KEY_LENGTH];
