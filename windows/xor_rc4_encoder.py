@@ -5,6 +5,8 @@ import hashlib
 import random
 import binascii
 import shutil
+import lief
+import argparse
 
 KEY_LENGTH = 16
 PRIME_LENGTH = 8
@@ -53,34 +55,49 @@ def encrypt_file_rc4_xor(input_data):
     print("Obfuscated Key: ", obfu_key_hex_str)
 
     return (xor_crypted_data, obfu_key_hex_str)
-    
+
 def main():
-    if len(sys.argv) != 3:
-        print(f"Usage: python {sys.argv[0]} input_file_path output_file_path")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Inject PE into Loader')
+    parser.add_argument('input', metavar="FILE", help='input file to inject')
+    parser.add_argument('-l', metavar="FILE", help='loader .exe file', required=True, default='reflective_loader.exe')
+    parser.add_argument('-o', metavar="FILE", help='output file', default="encoded.exe")
 
-    input_file_path = sys.argv[1]
-    output_file_path = sys.argv[2]
+    args = parser.parse_args()
 
-    with open(input_file_path, 'rb') as input_file:
-        input_data = input_file.read()
+    loader_PE = lief.PE.parse(args.l)
+
+    with open(args.input, "rb") as f:
+        input_data = f.read()
 
     (encrypted_data, key_str) = encrypt_file_rc4_xor(input_data)
 
-    current_dir = os.getcwd()
-    loader_path = os.path.join(current_dir, "reflective_loader.exe")
+    encrypted_data_lst = list(encrypted_data)
 
-    with open(loader_path, "rb") as loader_file:
-        loader_data = loader_file.read()
+    packed_section = lief.PE.Section(".rodata")
+    packed_section.content = encrypted_data_lst
+    packed_section.size = len(encrypted_data_lst)
+    packed_section.characteristics = (lief.PE.SECTION_CHARACTERISTICS.MEM_READ
+                                    | lief.PE.SECTION_CHARACTERISTICS.MEM_WRITE
+                                    | lief.PE.SECTION_CHARACTERISTICS.CNT_INITIALIZED_DATA)
+
+    loader_PE.add_section(packed_section)
+
+    # Will be recalculated by lief if zero
+    loader_PE.optional_header.sizeof_image = 0
+
+    # save the resulting PE
+    if(os.path.exists(args.o)):
+        print("Remove existing file")
+        os.remove(args.o)
+
+    lief_PE_builder = lief.PE.Builder(loader_PE)
+    lief_PE_builder.build()
+    lief_PE_builder.write(args.o)
 
     encrypted_size = len(encrypted_data)
-    loader_size = len(loader_data)
-    print("loader size: ", loader_size)
-    print("encrypted size: ", encrypted_size)
-    with open(output_file_path, "wb") as new_loader_file:
-        new_loader_file.write(loader_data)
-        new_loader_file.write(encrypted_data)
-        new_loader_file.write(loader_size.to_bytes(8, byteorder='little'))
+
+    print("Encrypted size: ", encrypted_size)
+    with open(args.o, "ab") as new_loader_file:
         new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
         new_loader_file.write(key_str.encode('ascii'))
 
