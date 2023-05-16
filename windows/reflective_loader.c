@@ -50,10 +50,16 @@ char* wordlist[256] = {"raw\0", "moo\0", "zed\0", "nun\0", "hin\0", "ado\0", "vi
                        "few\0", "yap\0", "nag\0", "gum\0", "pan\0", "orb\0", "ant\0", "zen\0", "hob\0", "gap\0", "pew\0", "men\0", "egg\0", "pal\0"};
 
 int main(int argc, char** argv) {
-     if (argc > 1) {
+    BOOL separated = FALSE;
+
+    if (argc > 2) {
         printf("Usage: %s\n", argv[0]);
         return 1;
+    } else if (argc > 2 && strcmp(argv[1], "separate")) {
+        separated = TRUE;
     }
+
+    char *subject = (separated)?argv[1]:argv[0];
 
     import_table_obfuscation();
     // disable_etw();

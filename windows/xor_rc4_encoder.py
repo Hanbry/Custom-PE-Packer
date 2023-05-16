@@ -1,6 +1,6 @@
 import os
 import sys
-from Crypto.Cipher import ARC4
+from Cryptodome.Cipher import ARC4
 import hashlib
 import random
 import binascii
@@ -78,12 +78,14 @@ def encrypt_file_rc4_xor_word(input_data):
 def main():
     parser = argparse.ArgumentParser(description='Inject PE into Loader')
     parser.add_argument('input', metavar="FILE", help='input file to inject')
-    parser.add_argument('-l', metavar="FILE", help='loader .exe file', required=True, default='reflective_loader.exe')
+    parser.add_argument('-l', metavar="FILE", help='loader .exe file', required=False, default='reflective_loader.exe')
     parser.add_argument('-o', metavar="FILE", help='output file', default="encoded.exe")
+    parser.add_argument('-m', metavar="FLAG", help='packing mode', required=True, default='separate')
 
     args = parser.parse_args()
-
-    loader_PE = lief.PE.parse(args.l)
+    mode = args.m
+    loader = args.l
+    output = args.o
 
     with open(args.input, "rb") as f:
         input_data = f.read()
@@ -91,38 +93,55 @@ def main():
     print("Decoded Last Byte:", hex(input_data[0]), "Decoded First Byte:" , hex(input_data[-1]))
 
     (encrypted_data, key_str) = encrypt_file_rc4_xor_word(input_data)
-
     encrypted_data_lst = list(encrypted_data)
 
-    packed_section = lief.PE.Section(".rodata")
-    packed_section.content = encrypted_data_lst
-    packed_section.size = len(encrypted_data_lst)
-    packed_section.characteristics = (lief.PE.SECTION_CHARACTERISTICS.MEM_READ
-                                    | lief.PE.SECTION_CHARACTERISTICS.MEM_WRITE
-                                    | lief.PE.SECTION_CHARACTERISTICS.CNT_INITIALIZED_DATA)
+    if mode == "separate":
+        encrypted_size = len(encrypted_data_lst)
+        
+        with open(output, 'w') as file:
+            file.write(encrypted_data_lst)
 
-    loader_PE.add_section(packed_section)
+        print("Original size ", len(input_data))
+        print("Encrypted size: ", encrypted_size)
+        with open(output, "ab") as new_loader_file:
+            new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
+            new_loader_file.write(key_str.encode('ascii'))
 
-    # Will be recalculated by lief if zero
-    loader_PE.optional_header.sizeof_image = 0
+    elif mode == "union":
+        loader_PE = lief.PE.parse(loader)
 
-    # save the resulting PE
-    if(os.path.exists(args.o)):
-        print("Remove existing file")
-        os.remove(args.o)
+        packed_section = lief.PE.Section(".rodata")
+        packed_section.content = encrypted_data_lst
+        packed_section.size = len(encrypted_data_lst)
+        packed_section.characteristics = (lief.PE.SECTION_CHARACTERISTICS.MEM_READ
+                                        | lief.PE.SECTION_CHARACTERISTICS.MEM_WRITE
+                                        | lief.PE.SECTION_CHARACTERISTICS.CNT_INITIALIZED_DATA)
 
-    lief_PE_builder = lief.PE.Builder(loader_PE)
-    lief_PE_builder.build()
-    lief_PE_builder.write(args.o)
+        loader_PE.add_section(packed_section)
 
-    encrypted_size = len(encrypted_data_lst)
+        # Will be recalculated by lief if zero
+        loader_PE.optional_header.sizeof_image = 0
 
-    print("Original size ", len(input_data))
-    print("Encrypted size: ", encrypted_size)
-    with open(args.o, "ab") as new_loader_file:
-        new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
-        new_loader_file.write(key_str.encode('ascii'))
+        # save the resulting PE
+        if(os.path.exists(output)):
+            print("Remove existing file")
+            os.remove(output)
 
+        lief_PE_builder = lief.PE.Builder(loader_PE)
+        lief_PE_builder.build()
+        lief_PE_builder.write(output)
+
+        encrypted_size = len(encrypted_data_lst)
+
+        print("Original size ", len(input_data))
+        print("Encrypted size: ", encrypted_size)
+        with open(output, "ab") as new_loader_file:
+            new_loader_file.write(encrypted_size.to_bytes(8, byteorder='little'))
+            new_loader_file.write(key_str.encode('ascii'))
+
+    else:
+        print("Could not recognize packing mode.")
+        sys.exit()
 
 if __name__ == '__main__':
     main()
