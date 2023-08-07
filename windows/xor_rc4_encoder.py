@@ -54,6 +54,7 @@ def encrypt_file_rc4_xor_word(input_data):
         encrypted_byte = rc4_crypted_data[i] ^ key_byte
         xor_crypted_data.append(encrypted_byte)
 
+    # encrypted_buf = xor_crypted_data
     encrypted_buf = bytearray()
     for i in range(len(xor_crypted_data)):
         byte_int = int(xor_crypted_data[i])
@@ -80,7 +81,7 @@ def main():
     parser.add_argument('input', metavar="FILE", help='input file to inject')
     parser.add_argument('-l', metavar="FILE", help='loader .exe file', required=False, default='reflective_loader.exe')
     parser.add_argument('-o', metavar="FILE", help='output file', default="encoded.exe")
-    parser.add_argument('-m', metavar="FLAG", help='packing mode', required=True, default='separate')
+    parser.add_argument('-m', metavar="FLAG", help='packing mode', required=False, default='union')
 
     args = parser.parse_args()
     mode = args.m
