@@ -97,11 +97,11 @@ int main(int argc, char** argv) {
     IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
 
     char* payload_PE = NULL;
-    char payload_PE_section_name[] = ".rodata";
+    char payload_PE_section_name[] = ".idata";
 
     for(int i = 0; i < p_NT_HDR->FileHeader.NumberOfSections; ++i) {
         if (!strcmp(sections[i].Name, payload_PE_section_name)) {
-            printf("[info] Found .rodata section\n");
+            printf("[info] Found .idata section\n");
             payload_PE = loader_handle + sections[i].VirtualAddress;
             printf("[info] Payload PE at VA: 0x%.8x\n", *payload_PE);
             break;

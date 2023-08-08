@@ -111,7 +111,7 @@ def main():
     elif mode == "union":
         loader_PE = lief.PE.parse(loader)
 
-        packed_section = lief.PE.Section(".rodata")
+        packed_section = lief.PE.Section(".idata")
         packed_section.content = encrypted_data_lst
         packed_section.size = len(encrypted_data_lst)
         packed_section.characteristics = (lief.PE.SECTION_CHARACTERISTICS.MEM_READ
