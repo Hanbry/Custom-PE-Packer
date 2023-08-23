@@ -1,2 +1,2 @@
 # Custom-PE-Packer
-Custom Binary File Packer/Encoder with integrated decoder Stub. A pentest-tool for modern EDR Evasion.
+Custom binary file packer/encoder with integrated decoder stub. A pentest-tool for modern EDR evasion.
