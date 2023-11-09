@@ -1,17 +1,11 @@
-
 cmake_minimum_required(VERSION 3.17)
 
-project(ReflectiveLoader)
+project(reflective_loader)
 
 set(CMAKE_C_STANDARD 11)
 
-option(DEBUG_MODE "Build with debug information" OFF)
-
-if(DEBUG_MODE)
-  set(CMAKE_BUILD_TYPE Debug)
-  add_definitions(-DDEBUG)
-else()
-  set(CMAKE_BUILD_TYPE Release)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_definitions(DEBUG)
 endif()
 
 add_executable(ReflectiveLoader src/reflective_loader.c)
