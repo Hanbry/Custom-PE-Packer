@@ -94,10 +94,10 @@ int main(int argc, char** argv) {
     IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*) (p_NT_HDR + 1);
 
     unsigned char* payload_pe = NULL;
-    unsigned char payload_pe_section_name[] = ".rodata";
+    char payload_pe_section_name[] = ".rodata";
 
     for(int i = 0; i < p_NT_HDR->FileHeader.NumberOfSections; ++i) {
-        if (!strcmp(sections[i].Name, payload_pe_section_name)) {
+        if (!strcmp((char *)sections[i].Name, payload_pe_section_name)) {
             DEBUG_PRINT("[info] Found .rodata section\n");
             payload_pe = loader_handle + sections[i].VirtualAddress;
             DEBUG_PRINT("[info] Payload PE at VA: 0x%.8x\n", *payload_pe);
@@ -310,7 +310,7 @@ void patch_etw(void) {
 unsigned char decode_word(char* word) {
     for (int i = 0; i < 256; i++) {
         if (!strcmp(wordlist[i], word)) {
-            return (char)i;
+            return (unsigned char)i;
         }
     }
     DEBUG_PRINT("[error] Decoding failed for: %s\n", word);
